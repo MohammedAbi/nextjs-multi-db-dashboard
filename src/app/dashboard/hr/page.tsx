@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { hr } from "@/lib/db";
 import DataTable from "@/components/DataTable";
 import { RowDataPacket } from "mysql2";

@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { inv } from "@/lib/db";
 import DataTable from "@/components/DataTable";
 
