@@ -1,10 +1,13 @@
 export const dynamic = "force-dynamic";
-import { invoice } from "@/lib/db";
+
+import { getPool } from "@/lib/db"; // use helper
 import DataTable from "@/components/DataTable";
 
 export default async function InvoicingDashboard() {
-  const [rows] = await invoice.query(`
-    SELECT 
+  const db = await getPool();
+
+  const result = await db.request().query(`
+    SELECT TOP 100
       i.invoice_id, 
       c.name AS client_name, 
       i.invoice_total, 
@@ -13,11 +16,9 @@ export default async function InvoicingDashboard() {
       i.due_date
     FROM invoices i
     LEFT JOIN clients c ON i.client_id = c.client_id
-    LIMIT 100
   `);
 
-  // Convert Date fields to readable strings
-  const invoices = (rows as any[]).map((row) => ({
+  const invoices = result.recordset.map((row) => ({
     invoice_id: row.invoice_id,
     client_name: row.client_name,
     invoice_total: row.invoice_total,

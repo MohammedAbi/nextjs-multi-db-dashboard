@@ -1,45 +1,55 @@
-import mysql from "mysql2/promise";
+import sql from "mssql";
 
-export const hr = mysql.createPool({
-  host: process.env.HR_HOST,
-  user: process.env.HR_USER,
-  password: process.env.HR_PASS,
-  database: process.env.HR_DB,
-  waitForConnections: true,
-  connectionLimit: 10,
-});
+// Validate required env vars
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`❌ Missing environment variable: ${name}`);
+  }
+  return value;
+}
 
-export const inv = mysql.createPool({
-  host: process.env.INV_HOST,
-  user: process.env.INV_USER,
-  password: process.env.INV_PASS,
-  database: process.env.INV_DB,
-  waitForConnections: true,
-  connectionLimit: 10,
-});
+const config: sql.config = {
+  server: requireEnv("AZURE_SQL_SERVER"),
+  database: requireEnv("AZURE_SQL_DATABASE"),
+  user: requireEnv("AZURE_SQL_USER"),
+  password: requireEnv("AZURE_SQL_PASSWORD"),
+  options: {
+    encrypt: true,
+    trustServerCertificate:
+      process.env.AZURE_SQL_TRUST_SERVER_CERTIFICATE === "yes",
+  },
+  pool: {
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000,
+  },
+};
 
-export const invoice = mysql.createPool({
-  host: process.env.INVOICE_HOST,
-  user: process.env.INVOICE_USER,
-  password: process.env.INVOICE_PASS,
-  database: process.env.INVOICE_DB,
-  waitForConnections: true,
-  connectionLimit: 10,
-});
+let cachedPool: sql.ConnectionPool | null = globalThis.__mssql_pool || null;
 
-export const store = mysql.createPool({
-  host: process.env.STORE_HOST,
-  user: process.env.STORE_USER,
-  password: process.env.STORE_PASS,
-  database: process.env.STORE_DB,
-  waitForConnections: true,
-  connectionLimit: 10,
-});
-export const orders = mysql.createPool({
-  host: process.env.STORE_HOST,
-  user: process.env.STORE_USER,
-  password: process.env.STORE_PASS,
-  database: process.env.STORE_DB,
-  waitForConnections: true,
-  connectionLimit: 10,
-});
+export async function getPool() {
+  if (cachedPool) {
+    if (!cachedPool.connected) {
+      await cachedPool.connect();
+    }
+    return cachedPool;
+  }
+
+  cachedPool = new sql.ConnectionPool(config);
+  globalThis.__mssql_pool = cachedPool;
+
+  await cachedPool.connect();
+  console.log("Connected to Azure SQL");
+  return cachedPool;
+}
+
+declare global {
+  var __mssql_pool: sql.ConnectionPool | undefined;
+}
+
+export async function query(queryText: string) {
+  const db = await getPool();
+  const result = await db.request().query(queryText);
+  return result.recordset;
+}

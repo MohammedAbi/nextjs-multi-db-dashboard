@@ -1,11 +1,19 @@
 export const dynamic = "force-dynamic";
-import { inv } from "@/lib/db";
+
+import { getPool } from "@/lib/db"; // use helper to ensure connection
 import DataTable from "@/components/DataTable";
 
 export default async function InventoryDashboard() {
-  const [products] = await inv.query(
-    "SELECT product_id, name, quantity_in_stock, unit_price FROM products LIMIT 100"
-  );
+  const db = await getPool();
+
+  const result = await db
+    .request()
+    .query(
+      "SELECT TOP 100 product_id, name, quantity_in_stock, unit_price FROM products"
+    );
+
+  const products = result.recordset;
+
   const columns = [
     { header: "Product ID", accessor: "product_id" },
     { header: "Name", accessor: "name" },

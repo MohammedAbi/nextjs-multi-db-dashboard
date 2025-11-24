@@ -1,152 +1,97 @@
 import DashboardLayout from "./dashboard/layout";
-import { hr, inv, invoice, store } from "@/lib/db";
-import { RowDataPacket } from "mysql2/promise";
+import { getPool } from "@/lib/db";
+import GroupCard from "@/components/GroupCard";
 
-// Detail type for GroupCard
-type Detail = { label: string; value: string | number };
-
-// GroupCard component
-function GroupCard({
-  title,
-  total,
-  details,
-}: {
-  title: string;
-  total: string | number;
-  details: Detail[];
-}) {
-  return (
-    <div className="bg-gray-800 border border-gray-700 rounded-2xl shadow-lg p-6 hover:bg-gray-750 transition">
-      <h2 className="text-lg font-semibold text-gray-300">{title}</h2>
-      <p className="text-4xl font-bold text-white mt-2">{total}</p>
-      {details.length > 0 && (
-        <ul className="mt-4 text-gray-300">
-          {details.map((item, index) => (
-            <li
-              key={`${title}-${item.label}-${index}`}
-              className="flex justify-between py-1 border-b border-gray-700 last:border-b-0"
-            >
-              <span>{item.label}</span>
-              <span>{item.value}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-// Home dashboard server component
 export default async function Home() {
-  // --- Employees ---
-  const [employeeRows] = await hr.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM employees"
-  );
-  const [totalSalaryRows] = await hr.query<RowDataPacket[]>(
-    "SELECT SUM(salary) as total FROM employees"
-  );
-  const [avgSalaryRows] = await hr.query<RowDataPacket[]>(
-    "SELECT AVG(salary) as avg FROM employees"
-  );
+  const db = await getPool();
 
-  const employeeCount = employeeRows[0].count as number;
-  const totalSalary = (totalSalaryRows[0].total as number) ?? 0;
-  const avgSalary = Math.round((avgSalaryRows[0].avg as number) ?? 0);
+  // Employees
+  const employeeResult = await db
+    .request()
+    .query(
+      "SELECT COUNT(*) AS count, SUM(salary) AS total, AVG(salary) AS avg FROM employees"
+    );
+  const employeeCount = employeeResult.recordset[0].count;
+  const totalSalary = employeeResult.recordset[0].total ?? 0;
+  const avgSalary = Math.round(employeeResult.recordset[0].avg ?? 0);
 
-  // --- Orders ---
-  const [orderRows] = await store.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM orders"
-  );
-  const [ordersInProcessRows] = await store.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM orders WHERE status = 1"
-  );
-  const [ordersCompletedRows] = await store.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM orders WHERE status = 2"
-  );
-  const [ordersCancelledRows] = await store.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM orders WHERE status = 3"
-  );
+  // Products
+  const productResult = await db.request().query(`
+    SELECT 
+      COUNT(*) AS count,
+      SUM(quantity_in_stock) AS totalStock,
+      AVG(unit_price) AS avgPrice,
+      SUM(quantity_in_stock * unit_price) AS totalValue,
+      SUM(CASE WHEN quantity_in_stock > 0 THEN 1 ELSE 0 END) AS inStock,
+      SUM(CASE WHEN quantity_in_stock = 0 THEN 1 ELSE 0 END) AS outOfStock
+    FROM products
+  `);
+  const productData = productResult.recordset[0];
+  const productCount = productData.count;
+  const inStockCount = productData.inStock;
+  const outOfStockCount = productData.outOfStock;
+  const totalStock = productData.totalStock ?? 0;
+  const avgPrice = Math.round(productData.avgPrice ?? 0);
+  const totalValue = productData.totalValue ?? 0;
 
-  const orderCount = orderRows[0].count as number;
-  const ordersInProcess = ordersInProcessRows[0].count as number;
-  const ordersCompleted = ordersCompletedRows[0].count as number;
-  const ordersCancelled = ordersCancelledRows[0].count as number;
+  // Orders
+  const orderQuery = await db.request().query(`
+    SELECT 
+      o.order_id,
+      os.name AS status
+    FROM orders o
+    LEFT JOIN order_statuses os ON os.order_status_id = o.status
+  `);
 
-  // --- Invoices ---
-  const [invoiceRows] = await invoice.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM invoices"
+  const orders = orderQuery.recordset;
+  const statusCounts = orders.reduce(
+    (acc: Record<string, number>, order) => {
+      const status = order.status || "Unknown";
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
   );
-  const [paidInvoicesRows] = await invoice.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM invoices WHERE payment_total >= invoice_total"
-  );
-  const [unpaidInvoicesRows] = await invoice.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM invoices WHERE payment_total < invoice_total"
-  );
-  const [totalPaymentsRows] = await invoice.query<RowDataPacket[]>(
-    "SELECT SUM(payment_total) as total FROM invoices"
-  );
+  const orderCount = orders.length;
 
-  const invoiceCount = invoiceRows[0].count as number;
-  const paidInvoices = paidInvoicesRows[0].count as number;
-  const unpaidInvoices = unpaidInvoicesRows[0].count as number;
-  const totalPayments = (totalPaymentsRows[0].total as number) ?? 0;
+  // Invoices
+  const invoiceResult = await db.request().query(`
+    SELECT 
+      COUNT(*) AS count,
+      SUM(CASE WHEN payment_total >= invoice_total THEN 1 ELSE 0 END) AS paid,
+      SUM(CASE WHEN payment_total < invoice_total THEN 1 ELSE 0 END) AS unpaid,
+      SUM(payment_total) AS totalPayments
+    FROM invoices
+  `);
+  const invoiceData = invoiceResult.recordset[0];
+  const invoiceCount = invoiceData.count;
+  const paidInvoices = invoiceData.paid;
+  const unpaidInvoices = invoiceData.unpaid;
+  const totalPayments = invoiceData.totalPayments ?? 0;
 
-  // --- Products (most useful) ---
-  const [productRows] = await inv.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM products"
-  );
-  const [inStockRows] = await inv.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM products WHERE quantity_in_stock > 0"
-  );
-  const [outOfStockRows] = await inv.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM products WHERE quantity_in_stock = 0"
-  );
-  const [totalStockRows] = await inv.query<RowDataPacket[]>(
-    "SELECT SUM(quantity_in_stock) as total FROM products"
-  );
-  const [avgPriceRows] = await inv.query<RowDataPacket[]>(
-    "SELECT AVG(unit_price) as avg FROM products"
-  );
-  const [totalValueRows] = await inv.query<RowDataPacket[]>(
-    "SELECT SUM(quantity_in_stock * unit_price) as total FROM products"
-  );
+  // Customers
+  const customerResult = await db.request().query(`
+    SELECT 
+      COUNT(*) AS count,
+      SUM(CASE WHEN points > 0 THEN 1 ELSE 0 END) AS withPoints,
+      SUM(CASE WHEN phone IS NULL OR phone = '' THEN 1 ELSE 0 END) AS noPhone,
+      AVG(points) AS avgPoints
+    FROM customers
+  `);
+  const customerData = customerResult.recordset[0];
+  const customerCount = customerData.count;
+  const customersWithPoints = customerData.withPoints;
+  const customersWithoutPhone = customerData.noPhone;
+  const avgPoints = Math.round(customerData.avgPoints ?? 0);
 
-  const productCount = productRows[0].count as number;
-  const inStockCount = inStockRows[0].count as number;
-  const outOfStockCount = outOfStockRows[0].count as number;
-  const totalStock = (totalStockRows[0].total as number) ?? 0;
-  const avgPrice = Math.round((avgPriceRows[0].avg as number) ?? 0);
-  const totalValue = (totalValueRows[0].total as number) ?? 0;
-
-  // --- Customers ---
-  const [customerRows] = await store.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM customers"
-  );
-  const [customersWithPointsRows] = await store.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM customers WHERE points > 0"
-  );
-  const [customersWithoutPhoneRows] = await store.query<RowDataPacket[]>(
-    "SELECT COUNT(*) as count FROM customers WHERE phone IS NULL OR phone = ''"
-  );
-  const [avgPointsRows] = await store.query<RowDataPacket[]>(
-    "SELECT AVG(points) as avg FROM customers"
-  );
-
-  const customerCount = customerRows[0].count as number;
-  const customersWithPoints = customersWithPointsRows[0].count as number;
-  const customersWithoutPhone = customersWithoutPhoneRows[0].count as number;
-  const avgPoints = Math.round((avgPointsRows[0].avg as number) ?? 0);
-
-  // --- Render Dashboard ---
   return (
     <DashboardLayout>
       <div className="p-8 max-w-7xl mx-auto text-gray-200">
         <h1 className="text-4xl font-bold mb-10 text-white">
-          Multi-Database Dashboard
+          Multi-Database Dashboard (Azure SQL)
         </h1>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <GroupCard
-            key="employees-card"
             title="Employees"
             total={employeeCount}
             details={[
@@ -155,29 +100,25 @@ export default async function Home() {
             ]}
           />
           <GroupCard
-            key="products-card"
             title="Products"
             total={productCount}
             details={[
               { label: "In Stock", value: inStockCount },
               { label: "Out of Stock", value: outOfStockCount },
-              { label: "Total Stock Quantity", value: totalStock },
-              { label: "Average Price", value: `$${avgPrice}` },
-              { label: "Total Inventory Value", value: `$${totalValue}` },
+              { label: "Total Qty", value: totalStock },
+              { label: "Avg Price", value: `$${avgPrice}` },
+              { label: "Inventory Value", value: `$${totalValue}` },
             ]}
           />
           <GroupCard
-            key="orders-card"
             title="Orders"
             total={orderCount}
-            details={[
-              { label: "In Process", value: ordersInProcess },
-              { label: "Completed", value: ordersCompleted },
-              { label: "Cancelled", value: ordersCancelled },
-            ]}
+            details={Object.entries(statusCounts).map(([name, count]) => ({
+              label: name,
+              value: count,
+            }))}
           />
           <GroupCard
-            key="invoices-card"
             title="Invoices"
             total={invoiceCount}
             details={[
@@ -187,13 +128,12 @@ export default async function Home() {
             ]}
           />
           <GroupCard
-            key="customers-card"
             title="Customers"
             total={customerCount}
             details={[
               { label: "With Points", value: customersWithPoints },
-              { label: "Without Phone", value: customersWithoutPhone },
-              { label: "Average Points", value: avgPoints },
+              { label: "No Phone", value: customersWithoutPhone },
+              { label: "Avg Points", value: avgPoints },
             ]}
           />
         </div>
