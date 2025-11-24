@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import DashboardLayout from "./dashboard/layout";
 import { getPool } from "@/lib/db";
 import GroupCard from "@/components/GroupCard";
